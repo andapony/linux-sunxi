@@ -1276,7 +1276,6 @@ config VIDEO_S5C73M3
 config VIDEO_SC031GS
 	tristate "SmartSens SC031GS sensor support"
 	depends on VIDEO_V4L2 && I2C && VIDEO_V4L2_SUBDEV_API
-	default y
 	help
 	  Support for the Smartsens SC031GS sensor.
 
