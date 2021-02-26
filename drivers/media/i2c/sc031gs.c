@@ -18,7 +18,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sysfs.h>
-#include <linux/rk-camera-module.h>
 #include <linux/slab.h>
 #include <linux/version.h>
 #include <media/media-entity.h>
@@ -65,7 +64,7 @@
 #define SC031GS_REG_VALUE_08BIT		1
 #define SC031GS_REG_VALUE_16BIT		2
 #define SC031GS_REG_VALUE_24BIT		3
-//#define DVP_INTERFACE
+#define DVP_INTERFACE
 
 #ifdef DVP_INTERFACE
 #define PIX_FORMAT MEDIA_BUS_FMT_Y8_1X8
@@ -119,10 +118,6 @@ struct sc031gs {
 	bool			streaming;
 	bool			power_on;
 	const struct sc031gs_mode *cur_mode;
-	u32			module_index;
-	const char		*module_facing;
-	const char		*module_name;
-	const char		*len_name;
 };
 
 #define to_sc031gs(sd) container_of(sd, struct sc031gs, subdev)
@@ -551,25 +546,11 @@ static int sc031gs_enable_test_pattern(struct sc031gs *sc031gs, u32 pattern)
 				SC031GS_REG_VALUE_08BIT, val);
 }
 
-static void sc031gs_get_module_inf(struct sc031gs *sc031gs,
-				  struct rkmodule_inf *inf)
-{
-	memset(inf, 0, sizeof(*inf));
-	strlcpy(inf->base.sensor, SC031GS_NAME, sizeof(inf->base.sensor));
-	strlcpy(inf->base.module, sc031gs->module_name,
-		sizeof(inf->base.module));
-	strlcpy(inf->base.lens, sc031gs->len_name, sizeof(inf->base.lens));
-}
-
 static long sc031gs_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
-	struct sc031gs *sc031gs = to_sc031gs(sd);
 	long ret = 0;
 
 	switch (cmd) {
-	case RKMODULE_GET_MODULE_INFO:
-		sc031gs_get_module_inf(sc031gs, (struct rkmodule_inf *)arg);
-		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -577,49 +558,6 @@ static long sc031gs_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 
 	return ret;
 }
-
-#ifdef CONFIG_COMPAT
-static long sc031gs_compat_ioctl32(struct v4l2_subdev *sd,
-				  unsigned int cmd, unsigned long arg)
-{
-	void __user *up = compat_ptr(arg);
-	struct rkmodule_inf *inf;
-	struct rkmodule_awb_cfg *cfg;
-	long ret;
-
-	switch (cmd) {
-	case RKMODULE_GET_MODULE_INFO:
-		inf = kzalloc(sizeof(*inf), GFP_KERNEL);
-		if (!inf) {
-			ret = -ENOMEM;
-			return ret;
-		}
-
-		ret = sc031gs_ioctl(sd, cmd, inf);
-		if (!ret)
-			ret = copy_to_user(up, inf, sizeof(*inf));
-		kfree(inf);
-		break;
-	case RKMODULE_AWB_CFG:
-		cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
-		if (!cfg) {
-			ret = -ENOMEM;
-			return ret;
-		}
-
-		ret = copy_from_user(cfg, up, sizeof(*cfg));
-		if (!ret)
-			ret = sc031gs_ioctl(sd, cmd, cfg);
-		kfree(cfg);
-		break;
-	default:
-		ret = -ENOIOCTLCMD;
-		break;
-	}
-
-	return ret;
-}
-#endif
 
 static int sc031gs_set_ctrl_gain(struct sc031gs *sc031gs, u32 a_gain)
 {
@@ -879,18 +817,6 @@ static int sc031gs_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 }
 #endif
 
-#ifdef DVP_INTERFACE
-static int sc031gs_g_mbus_config(struct v4l2_subdev *sd,
-	struct v4l2_mbus_config *config)
-{
-	config->type = V4L2_MBUS_PARALLEL;
-	config->flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
-			V4L2_MBUS_VSYNC_ACTIVE_LOW |
-			V4L2_MBUS_PCLK_SAMPLE_FALLING;
-	return 0;
-}
-#endif
-
 static int sc031gs_enum_frame_interval(struct v4l2_subdev *sd,
 				      struct v4l2_subdev_pad_config *cfg,
 				      struct v4l2_subdev_frame_interval_enum *fie)
@@ -921,17 +847,11 @@ static const struct v4l2_subdev_internal_ops sc031gs_internal_ops = {
 static const struct v4l2_subdev_core_ops sc031gs_core_ops = {
 	.s_power = sc031gs_s_power,
 	.ioctl = sc031gs_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl32 = sc031gs_compat_ioctl32,
-#endif
 };
 
 static const struct v4l2_subdev_video_ops sc031gs_video_ops = {
 	.s_stream = sc031gs_s_stream,
 	.g_frame_interval = sc031gs_g_frame_interval,
-	#ifdef DVP_INTERFACE
-	.g_mbus_config = sc031gs_g_mbus_config,
-	#endif
 };
 
 static const struct v4l2_subdev_pad_ops sc031gs_pad_ops = {
@@ -1107,10 +1027,8 @@ static int sc031gs_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
-	struct device_node *node = dev->of_node;
 	struct sc031gs *sc031gs;
 	struct v4l2_subdev *sd;
-	char facing[2];
 	int ret;
 
 	dev_info(dev, "driver version: %02x.%02x.%02x",
@@ -1121,19 +1039,6 @@ static int sc031gs_probe(struct i2c_client *client,
 	sc031gs = devm_kzalloc(dev, sizeof(*sc031gs), GFP_KERNEL);
 	if (!sc031gs)
 		return -ENOMEM;
-
-	ret = of_property_read_u32(node, RKMODULE_CAMERA_MODULE_INDEX,
-				   &sc031gs->module_index);
-	ret |= of_property_read_string(node, RKMODULE_CAMERA_MODULE_FACING,
-				       &sc031gs->module_facing);
-	ret |= of_property_read_string(node, RKMODULE_CAMERA_MODULE_NAME,
-				       &sc031gs->module_name);
-	ret |= of_property_read_string(node, RKMODULE_CAMERA_LENS_NAME,
-				       &sc031gs->len_name);
-	if (ret) {
-		dev_err(dev, "could not get module information!\n");
-		return -EINVAL;
-	}
 
 	sc031gs->client = client;
 	sc031gs->cur_mode = &supported_modes[0];
@@ -1179,21 +1084,12 @@ static int sc031gs_probe(struct i2c_client *client,
 #endif
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	sc031gs->pad.flags = MEDIA_PAD_FL_SOURCE;
-	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	ret = media_entity_init(&sd->entity, 1, &sc031gs->pad, 0);
+	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&sd->entity, 1, &sc031gs->pad);
 	if (ret < 0)
 		goto err_power_off;
 #endif
 
-	memset(facing, 0, sizeof(facing));
-	if (strcmp(sc031gs->module_facing, "back") == 0)
-		facing[0] = 'b';
-	else
-		facing[0] = 'f';
-
-	snprintf(sd->name, sizeof(sd->name), "m%02d_%s_%s %s",
-		 sc031gs->module_index, facing,
-		 SC031GS_NAME, dev_name(sd->dev));
 	ret = v4l2_async_register_subdev_sensor_common(sd);
 	if (ret) {
 		dev_err(dev, "v4l2 async register subdev failed\n");
