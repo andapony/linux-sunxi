@@ -67,7 +67,7 @@
 #define DVP_INTERFACE
 
 #ifdef DVP_INTERFACE
-#define PIX_FORMAT MEDIA_BUS_FMT_Y8_1X8
+#define PIX_FORMAT MEDIA_BUS_FMT_YUYV8_2X8
 #else
 #define PIX_FORMAT MEDIA_BUS_FMT_Y10_1X10
 #define SC031GS_LANES			1
@@ -305,7 +305,7 @@ static const struct regval sc031gs_global_regs[] = {
 
 static const struct sc031gs_mode supported_modes[] = {
 	{
-		.width = 640,
+		.width = 320,
 		.height = 480,
 		.max_fps = {
 			.numerator = 10000,
